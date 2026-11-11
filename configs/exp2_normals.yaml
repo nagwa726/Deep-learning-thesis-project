@@ -1,0 +1,31 @@
+# Experiment 2: PointAttN + Surface Normals only
+# Used by train_contribution.py
+
+experiment_name: exp2_pointattn_normals
+geo_mode: normals        # geo_dim = 3 (nx, ny, nz)
+
+processed_dir: data/processed/mug500
+work_dir: outputs/exp2_normals
+
+# Everything below is IDENTICAL to exp1_original.yaml on purpose, per the
+# report's requirement to hold training/eval settings fixed across the
+# ablation study so the comparison is fair.
+batch_size: 4
+workers: 0
+nepoch: 50
+manual_seed: 42
+
+lr: 0.0001
+lr_decay: true
+lr_decay_interval: 20
+lr_decay_rate: 0.7
+lr_clip: 1.0e-6
+optimizer: Adam
+weight_decay: 0
+betas: "0.9, 0.999"
+
+step_interval_to_print: 5
+epoch_interval_to_save: 5
+epoch_interval_to_val: 5
+
+f1_threshold_mm: 2.0

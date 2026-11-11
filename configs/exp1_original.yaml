@@ -1,0 +1,31 @@
+# Experiment 1: Original PointAttN (unmodified baseline)
+# Used by train_baseline.py
+
+experiment_name: exp1_original_pointattn
+geo_mode: none          # no geometric features -- plain XYZ encoder
+
+processed_dir: data/processed/mug500
+work_dir: outputs/exp1_original
+
+batch_size: 4           # small on purpose: CPU + no mixed precision
+workers: 0              # keep 0 on CPU/Colab to avoid multiprocessing overhead
+nepoch: 50
+manual_seed: 42
+
+lr: 0.0001
+lr_decay: true
+lr_decay_interval: 20
+lr_decay_rate: 0.7
+lr_clip: 1.0e-6
+optimizer: Adam
+weight_decay: 0
+betas: "0.9, 0.999"
+
+step_interval_to_print: 5
+epoch_interval_to_save: 5
+epoch_interval_to_val: 5
+
+# metrics
+f1_threshold_mm: 2.0     # in PHYSICAL units (mm) -- see utils/metrics.py and
+                          # utils/normalization.py for how normalized-space
+                          # outputs are converted back to mm before this is applied

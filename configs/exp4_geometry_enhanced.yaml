@@ -1,0 +1,29 @@
+# Experiment 4: Geometry-Enhanced PointAttN (Normals + Curvature) -- OUR FULL CONTRIBUTION
+# Used by train_contribution.py
+
+experiment_name: exp4_geometry_enhanced_pointattn
+geo_mode: both           # geo_dim = 4 (nx, ny, nz, curvature)
+
+processed_dir: data/processed/mug500
+work_dir: outputs/exp4_geometry_enhanced
+
+# Identical training/eval settings to exp1/exp2/exp3 -- see note there.
+batch_size: 4
+workers: 0
+nepoch: 50
+manual_seed: 42
+
+lr: 0.0001
+lr_decay: true
+lr_decay_interval: 20
+lr_decay_rate: 0.7
+lr_clip: 1.0e-6
+optimizer: Adam
+weight_decay: 0
+betas: "0.9, 0.999"
+
+step_interval_to_print: 5
+epoch_interval_to_save: 5
+epoch_interval_to_val: 5
+
+f1_threshold_mm: 2.0
