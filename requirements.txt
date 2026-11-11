@@ -1,0 +1,7 @@
+# Tested against: Python 3.8+, CPU-only (no CUDA required -- see models/cpu_ops.py)
+torch>=1.9.0        # CPU build is fine: pip install torch --index-url https://download.pytorch.org/whl/cpu
+numpy>=1.21
+scipy>=1.7
+PyYAML>=5.4
+open3d>=0.15        # geometry (normals/curvature) + PLY/VTK I/O; CPU fallback exists in
+                    # utils/geometry_features.py if open3d is hard to install on Colab

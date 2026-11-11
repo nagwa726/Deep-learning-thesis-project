@@ -1,0 +1,14 @@
+# Medical data and large/generated files must never be pushed (see report
+# section 11, "مهم جدا": only code + docs + shareable results go to GitHub).
+data/raw/
+data/processed/
+outputs/
+*.ply
+*.vtk
+*.pth
+*.npz
+
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
