@@ -161,8 +161,22 @@ def process_one_skull(points_8192: np.ndarray, sample_id: str, args, rng) -> dic
     complete_norm = normalize(complete, center, scale)
     partial_norm_raw = normalize(partial_raw, center, scale)
 
-    # Step 7: fixed-size partial input (so batches can be stacked)
-    n_partial_target = int(round((1.0 - args.missing_ratio) * args.n_complete))
+    # Step 7: fixed-size partial input (so batches can be stacked).
+    #
+    # IMPORTANT (found by actually running this on Colab, not just reading
+    # the code): the input point count fed into PCT_encoder is NOT a free
+    # choice -- the encoder's "seed generation" stage hardcodes a relationship
+    # between it and the fixed kernel size of its ConvTranspose1d(..., 128)
+    # layer (see models/pointattn_baseline.py's final encoder reshape,
+    # `x2_d.reshape(batch_size, channel*4, N//8)`). That reshape's arithmetic
+    # only works out when N // 8 == 256, i.e. N == 2048, REGARDLESS of how
+    # much of that input is "real" geometry vs. padding. This mirrors how the
+    # upstream PCN-style setup already works (partial clouds are tiled/padded
+    # up to a fixed input size), so the fix is: always resize the partial
+    # cloud to args.n_complete (2048), and let `actual_kept_fraction` above
+    # (computed BEFORE this resize) be the number that actually reports how
+    # much of the input is real vs. tiled/padded -- NOT the resize target.
+    n_partial_target = args.n_complete
     partial_norm = resize_to_fixed_count(partial_norm_raw, n_partial_target, rng)
 
     # Step 6: geometric descriptors computed on the (normalized) PARTIAL

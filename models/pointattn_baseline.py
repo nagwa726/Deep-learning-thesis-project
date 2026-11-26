@@ -219,20 +219,33 @@ class PCT_encoder(nn.Module):
 class Model(nn.Module):
     """
     Full PointAttN model: encoder -> two refinement stages. `step1`/`step2`
-    control how much the point count is upsampled at each refinement stage;
-    kept as in upstream (values tuned for the 'pcn'/'c3d' benchmarks there).
-    For our skull dataset (2048 input points), we reuse the same step
-    sizes as the 'pcn' setting, since we also input/output a comparable
-    point budget (2048) -- see cfgs/*.yaml "dataset: skull" handling below.
+    control how much the point count is upsampled at each refinement stage.
+
+    CORRECTED after actually running this on Colab: the encoder's seed
+    stage always produces a FIXED 512-point intermediate (see
+    PCT_encoder's ConvTranspose1d(..., 128) seed generator, independent of
+    N), so the final output count is exactly `512 * step1 * step2`.
+    Upstream's own 'pcn' setting uses step1=4, step2=8, which gives
+    512*4*8 = 16384 output points -- correct for PCN's benchmark (whose
+    ground truth is a dense 16384-point cloud), but NOT what we want here:
+    our complete/ground-truth clouds are 2048 points (see
+    data/prepare_mug500.py), so an 16384-point prediction would be 8x
+    larger than it needs to be, wasting CPU time in the attention-heavy
+    refine1 stage for no benefit (Chamfer distance doesn't even require
+    matching point counts, so the mismatch wouldn't crash -- it would just
+    silently waste compute, which is exactly the kind of thing worth
+    catching before a long training run on CPU).
+
+    We therefore use step1=2, step2=2 -> 512*2*2 = 2048, matching our
+    own ground-truth resolution exactly.
     """
 
     def __init__(self, args):
         super().__init__()
         # step1/step2 set how many points come out of each refine() stage.
-        # Kept identical to upstream's 'pcn' branch since our skull clouds
-        # use a similar point budget (2048) to PCN; documented explicitly
-        # rather than silently inherited.
-        step1, step2 = 4, 8
+        # 512 (fixed seed count) * step1 * step2 must equal our complete-
+        # cloud resolution (2048) -- see class docstring above for why.
+        step1, step2 = 2, 2
 
         self.encoder = PCT_encoder()
         self.refine = PCT_refine(ratio=step1)

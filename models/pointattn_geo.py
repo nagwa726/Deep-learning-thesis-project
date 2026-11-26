@@ -170,7 +170,12 @@ class ModelGeo(nn.Module):
 
     def __init__(self, args, geo_dim=4):
         super().__init__()
-        step1, step2 = 4, 8  # identical reasoning/values as baseline.Model
+        # step1=2, step2=2 -> 512 (fixed seed count) * 2 * 2 = 2048 output
+        # points, matching our complete-cloud resolution. See
+        # models/pointattn_baseline.py's Model class docstring for why this
+        # is NOT upstream's 'pcn' (4, 8) setting -- that gives 16384 points,
+        # 8x more than our ground truth needs, found by actually running this.
+        step1, step2 = 2, 2
 
         self.geo_dim = geo_dim
         self.encoder = PCT_encoder_geo(geo_dim=geo_dim)

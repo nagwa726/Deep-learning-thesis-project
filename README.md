@@ -65,7 +65,15 @@ differs — so the comparison is fair.
   ones). Original resolution 8192 points/skull, subsampled to 2048 for
   training. Missing region = one-sided, X-percentile-based removal
   targeting ~30% missing / ~70% kept (NOT random point deletion — this
-  simulates a spatially contiguous real-world defect).
+  simulates a spatially contiguous real-world defect). **The partial cloud
+  is then tiled/padded back up to exactly 2048 points** before being fed to
+  the network — this is not optional: PointAttN's encoder has a fixed-size
+  seed-generation stage (`ConvTranspose1d(..., kernel_size=128)` feeding a
+  reshape that only works arithmetically when the input is exactly 2048
+  points), so the network's *input tensor size* is always 2048 regardless of
+  missingness; the missing-ness shows up in how many of those 2048 points
+  are genuine vs. tiled duplicates, not in the tensor's length. (Found by
+  actually running the pipeline on Colab — see git history for the fix.)
 - **PPCNet** (secondary, generalization check): lumbar vertebrae L1–L5,
   pre-split 829/103/105 (train/val/test). Kept and reported as an
   **independent** experiment — never mixed with MUG500+ numbers.
