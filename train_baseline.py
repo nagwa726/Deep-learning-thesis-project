@@ -162,7 +162,37 @@ def main():
     train_loss_meter = AverageMeter()
     lr = cfg["lr"]
 
-    for epoch in range(cfg["nepoch"]):
+    # ---- resume from checkpoint, if one exists ----
+    # Lets you e.g. finish a 50-epoch run, bump nepoch to 100 in the
+    # config, and rerun this same command -- training continues from
+    # where it left off instead of restarting from epoch 0. Also means an
+    # interrupted Colab session can simply be rerun.
+    start_epoch = 0
+    ckpt_path = os.path.join(cfg["work_dir"], "model_last.pth")
+    if os.path.exists(ckpt_path):
+        ckpt = torch.load(ckpt_path, map_location="cpu")
+        net.load_state_dict(ckpt["net_state_dict"])
+        if "optimizer_state_dict" in ckpt:
+            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        start_epoch = ckpt["epoch"] + 1
+        if "lr" in ckpt:
+            lr = ckpt["lr"]
+            for pg in optimizer.param_groups:
+                pg["lr"] = lr
+        logger.info(
+            "Resuming from checkpoint %s (last completed epoch=%d) -> continuing from epoch %d",
+            ckpt_path, ckpt["epoch"], start_epoch,
+        )
+        if start_epoch >= cfg["nepoch"]:
+            logger.info(
+                "Checkpoint's epoch (%d) already >= configured nepoch (%d) -- nothing to "
+                "do. Increase nepoch in the config if you want to keep training.",
+                start_epoch, cfg["nepoch"],
+            )
+    else:
+        logger.info("No existing checkpoint at %s -- starting fresh from epoch 0", ckpt_path)
+
+    for epoch in range(start_epoch, cfg["nepoch"]):
         net.train()
         train_loss_meter = AverageMeter()
 
@@ -189,10 +219,18 @@ def main():
                     epoch, i, len(train_loader), loss2.mean().item(), net_loss.item(), lr,
                 )
 
-        if epoch % cfg["epoch_interval_to_save"] == 0:
-            ckpt_path = os.path.join(cfg["work_dir"], "model_last.pth")
-            torch.save({"net_state_dict": net.state_dict(), "epoch": epoch}, ckpt_path)
-            logger.info("Saved checkpoint: %s", ckpt_path)
+        if epoch % cfg["epoch_interval_to_save"] == 0 or epoch == cfg["nepoch"] - 1:
+            # Always checkpoint the final epoch too (not just every
+            # epoch_interval_to_save-th one), so a resumed run picks up
+            # exactly where a completed run left off instead of redoing
+            # a few epochs.
+            torch.save({
+                "net_state_dict": net.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "epoch": epoch,
+                "lr": lr,
+            }, ckpt_path)
+            logger.info("Saved checkpoint: %s (epoch=%d)", ckpt_path, epoch)
 
         if epoch % cfg["epoch_interval_to_val"] == 0 or epoch == cfg["nepoch"] - 1:
             run_validation(net, val_loader, cfg, epoch, logger)
