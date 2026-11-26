@@ -3,19 +3,33 @@ prepare_mug500.py
 -------------------
 Offline data-preparation script for the MUG500+ skull dataset (section 5 of
 the project report). Run this ONCE (in Colab, after downloading and
-extracting the real dataset from figshare) to turn raw complete skull PLY
-files into fixed-size, normalized (complete, incomplete, normals,
+extracting the real dataset from figshare) to turn raw complete skull
+surface meshes into fixed-size, normalized (complete, incomplete, normals,
 curvature) training samples saved as .npz, so the training scripts
-themselves stay fast and simple (no PLY I/O / geometry computation in the
+themselves stay fast and simple (no mesh I/O / geometry computation in the
 training loop).
+
+IMPORTANT, found by actually inspecting the real dataset (not assumed):
+MUG500+ does NOT ship ready-made point clouds. Each skull is distributed as
+a per-skull folder (e.g. `A0001/`) containing a `.nrrd` raw CT volume AND a
+`.stl` surface mesh of that same skull (some skulls also have a cleaner
+`A0001_clear.stl` variant with scan artifacts removed -- preferred when
+present). On figshare these folders are bundled into range-archives
+(`A0001-A0020.zip`, `A0021-A0030.zip`, ...; "A-case" = healthy, "B-case" =
+craniotomy/defect). This script only needs the `.stl` meshes -- it reads
+each mesh and SAMPLES points off its surface (see utils/stl_io.py); the
+heavy `.nrrd` CT volumes are never opened here and do not need to be kept
+around after extraction.
 
 WHAT THIS SCRIPT DOES, STEP BY STEP (matches report section 5 exactly):
 
- 1. Loads each COMPLETE ("A-case", i.e. non-defective) skull PLY file.
+ 1. Loads each COMPLETE ("A-case", i.e. non-defective) skull's surface mesh
+    (`.stl`, preferring `_clear.stl` when both exist).
     -> report: "في تجاربنا نستخدم الحالات السليمة (A-cases)."
- 2. The raw skull has 8192 points. We farthest-point-sample it down to 2048
-    points -- this 2048-point cloud is the "complete" ground truth used
-    for training.
+ 2. We sample 8192 points off the mesh surface (area-weighted random
+    sampling, utils/stl_io.py), then farthest-point-sample those down to
+    2048 points for good, even spatial coverage -- this 2048-point cloud is
+    the "complete" ground truth used for training.
     -> report: "عدد النقاط في النموذج الأصلي: 8192 ... المستخدم في تجهيز
        بيانات التدريب: 2048."
  3. We create the INCOMPLETE version by removing a spatially-contiguous
@@ -48,14 +62,21 @@ files are MEDICAL DATA and must NOT be pushed to the public GitHub repo.
 This script writes its output under `data/processed/` which is listed in
 .gitignore -- only the CODE that produces that data is tracked in git.
 
-Usage (after placing extracted PLY files under --raw_dir):
+Usage (after downloading + extracting the real dataset's zip archive(s)
+under --raw_dir, e.g. unzip "A0001-A0020.zip" so you end up with
+<raw_dir>/A0001/A0001.stl, <raw_dir>/A0001/A0001_clear.stl, etc.):
     python data/prepare_mug500.py \
-        --raw_dir  /path/to/MUG500plus/complete_skulls \
+        --raw_dir  /path/to/extracted/MUG500plus \
         --out_dir  data/processed/mug500 \
         --n_complete 2048 --missing_ratio 0.30 --knn_geo 20
 
+--raw_dir may contain the per-skull folders directly, OR may contain one
+level of extra nesting (e.g. several extracted zip ranges side by side) --
+this script searches --raw_dir recursively for any folder that holds a
+`.stl` file, so either layout works.
+
 Run with --self_test to generate a handful of SYNTHETIC ellipsoid "skulls"
-instead of reading real PLY files -- useful to verify the whole pipeline
+instead of reading real mesh files -- useful to verify the whole pipeline
 runs correctly before the real dataset is available (see tests/).
 """
 
@@ -70,6 +91,7 @@ import numpy as np
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.normalization import compute_center_scale, normalize, save_norm_params
 from utils.geometry_features import compute_normals_and_curvature
+from utils.stl_io import load_mesh_and_sample
 
 
 def farthest_point_sample_np(points: np.ndarray, n_sample: int, seed: int | None = None) -> np.ndarray:
@@ -216,16 +238,53 @@ def _save_sample(sample: dict, out_dir: str) -> str:
     return path
 
 
-def _load_ply_points(path: str) -> np.ndarray:
-    try:
-        import open3d as o3d
-    except ImportError as e:
-        raise RuntimeError(
-            "open3d is required to read real MUG500+ PLY files. "
-            "Install it in your Colab environment (`pip install open3d`)."
-        ) from e
-    pcd = o3d.io.read_point_cloud(path)
-    return np.asarray(pcd.points, dtype=np.float64)
+def _load_skull_mesh_points(stl_path: str, n_sample: int, seed: int) -> np.ndarray:
+    """
+    Loads one skull's `.stl` surface mesh and samples `n_sample` points off
+    its surface (area-weighted random sampling -- see utils/stl_io.py,
+    which is pure NumPy and has its own self-test, so this does not depend
+    on open3d being installed).
+
+    This replaces the old `_load_ply_points`: the real MUG500+ dataset does
+    not ship ready-made point clouds, so the "raw 8192-point cloud" used by
+    `process_one_skull` below is produced here, from the mesh, rather than
+    read directly from a file.
+    """
+    return load_mesh_and_sample(stl_path, n_sample, seed=seed)
+
+
+def discover_skull_meshes(raw_dir: str) -> dict[str, str]:
+    """
+    Finds every skull's best `.stl` mesh file under --raw_dir, however it
+    is laid out (one or more extracted zip ranges, nested or not).
+
+    The real dataset's layout is one folder per skull, e.g.:
+        <raw_dir>/A0001/A0001.stl
+        <raw_dir>/A0001/A0001_clear.stl   (cleaner, scan-artifact-removed
+                                            variant -- PREFERRED when present)
+        <raw_dir>/A0001/A0001.nrrd        (raw CT volume -- NOT read by us)
+        <raw_dir>/A0001/A0001.png
+
+    We walk --raw_dir recursively (so it doesn't matter whether several
+    extracted zip ranges sit side by side, or whether there's an extra
+    nesting level) and, for every directory that contains at least one
+    `.stl` file, pick the `_clear.stl` variant if one exists, else the
+    first plain `.stl` found. The skull's sample_id is taken from the
+    containing folder's name (e.g. "A0001"), which is how the dataset
+    names its A-cases (healthy) and B-cases (craniotomy/defect).
+
+    Returns: {sample_id: stl_path}, sorted by sample_id.
+    """
+    found: dict[str, str] = {}
+    for dirpath, _dirnames, filenames in os.walk(raw_dir):
+        stl_files = [f for f in filenames if f.lower().endswith(".stl")]
+        if not stl_files:
+            continue
+        clear = [f for f in stl_files if f.lower().endswith("_clear.stl")]
+        chosen = clear[0] if clear else sorted(stl_files)[0]
+        sample_id = os.path.basename(os.path.normpath(dirpath))
+        found[sample_id] = os.path.join(dirpath, chosen)
+    return dict(sorted(found.items()))
 
 
 def make_synthetic_skull(n_points: int, rng) -> np.ndarray:
@@ -250,7 +309,10 @@ def make_synthetic_skull(n_points: int, rng) -> np.ndarray:
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--raw_dir", type=str, default=None, help="dir of raw complete-skull .ply files")
+    p.add_argument("--raw_dir", type=str, default=None,
+                    help="dir containing extracted MUG500+ skull folders (each with a .stl mesh)")
+    p.add_argument("--raw_n_sample", type=int, default=8192,
+                    help="points sampled off each mesh's surface before FPS down to --n_complete")
     p.add_argument("--out_dir", type=str, default="data/processed/mug500")
     p.add_argument("--n_complete", type=int, default=2048)
     p.add_argument("--missing_ratio", type=float, default=0.30)
@@ -272,14 +334,33 @@ def main():
     else:
         if not args.raw_dir:
             raise SystemExit("--raw_dir is required unless --self_test is set")
-        files = sorted(f for f in os.listdir(args.raw_dir) if f.lower().endswith(".ply"))
-        sample_ids = [os.path.splitext(f)[0] for f in files]
-        raw_clouds = {sid: _load_ply_points(os.path.join(args.raw_dir, f))
-                      for sid, f in zip(sample_ids, files)}
+        skull_meshes = discover_skull_meshes(args.raw_dir)
+        if not skull_meshes:
+            raise SystemExit(f"no .stl mesh files found anywhere under {args.raw_dir!r}")
+        print(f"[prepare_mug500] found {len(skull_meshes)} skull meshes under {args.raw_dir}")
+
+        sample_ids = []
+        raw_clouds = {}
+        for sid, stl_path in skull_meshes.items():
+            try:
+                raw_clouds[sid] = _load_skull_mesh_points(
+                    stl_path, args.raw_n_sample, seed=int(rng.integers(1 << 30))
+                )
+                sample_ids.append(sid)
+            except Exception as e:
+                # Corrupted/unreadable mesh files are a known issue with
+                # this dataset (a related paper reports ~21 corrupted
+                # files out of 500+29) -- skip and keep going rather than
+                # crashing the whole batch.
+                print(f"[prepare_mug500] WARNING: skipping {sid} ({stl_path}): {e}")
 
     manifest = {"samples": [], "args": vars(args)}
     for sid in sample_ids:
-        sample = process_one_skull(raw_clouds[sid], sid, args, rng)
+        try:
+            sample = process_one_skull(raw_clouds[sid], sid, args, rng)
+        except Exception as e:
+            print(f"[prepare_mug500] WARNING: skipping {sid} during processing: {e}")
+            continue
         path = _save_sample(sample, args.out_dir)
         manifest["samples"].append({
             "id": sid, "path": os.path.basename(path),

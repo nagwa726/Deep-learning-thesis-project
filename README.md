@@ -62,8 +62,13 @@ differs — so the comparison is fair.
 ## 5. Datasets
 
 - **MUG500+** (primary): 500 intact skulls (we use the "A-cases"/healthy
-  ones). Original resolution 8192 points/skull, subsampled to 2048 for
-  training. Missing region = one-sided, X-percentile-based removal
+  ones). **The real dataset does not ship point clouds** — each skull is a
+  folder (e.g. `A0001/`) containing a `.nrrd` raw CT volume and a `.stl`
+  surface mesh (sometimes also a cleaner `_clear.stl` variant); only the
+  `.stl` is used here (`utils/stl_io.py` reads it and samples points off
+  its surface — pure NumPy, no Open3D dependency). We sample 8192
+  points/skull off the mesh surface, then farthest-point-sample down to
+  2048 for training. Missing region = one-sided, X-percentile-based removal
   targeting ~30% missing / ~70% kept (NOT random point deletion — this
   simulates a spatially contiguous real-world defect). **The partial cloud
   is then tiled/padded back up to exactly 2048 points** before being fed to
@@ -78,11 +83,14 @@ differs — so the comparison is fair.
   pre-split 829/103/105 (train/val/test). Kept and reported as an
   **independent** experiment — never mixed with MUG500+ numbers.
 
-Run `data/prepare_mug500.py` once to turn raw PLY files into the normalized,
-fixed-size `.npz` samples the training scripts consume (see "How to run"
-below). **Medical point-cloud data is never committed to this repo** —
-`data/processed/` and `data/raw/` are gitignored, per the report's own
-requirement.
+Run `data/prepare_mug500.py` once to turn the raw `.stl` skull meshes into
+the normalized, fixed-size `.npz` samples the training scripts consume
+(see "How to run" below). It recursively finds every skull folder under
+`--raw_dir` (so it doesn't matter whether you extracted one zip range or
+several side by side), so there is no need to flatten anything by hand.
+**Medical data (meshes, CT volumes, processed point clouds) is never
+committed to this repo** — `data/processed/` and `data/raw/` are
+gitignored, per the report's own requirement; only the code is tracked.
 
 ## 6. Normalization, denormalization, physical units
 
@@ -94,7 +102,7 @@ requirement.
   truth are denormalized back to physical units (`utils/normalization.py`,
   `denormalize()`), using that sample's own saved Center/Scale.
 - **Units are not assumed.** Before trusting "mm" anywhere in the thesis,
-  confirm the real unit of the original MUG500+ PLY files / PPCNet VTK
+  confirm the real unit of the original MUG500+ STL meshes / PPCNet VTK
   files from their documentation — do not assume mm vs cm. Curvature itself
   is a dimensionless eigenvalue ratio and needs no unit conversion
   (see `denormalize_curvature()`).
@@ -114,13 +122,14 @@ names).
 ```
 configs/                 one YAML per ablation experiment
 data/
-  prepare_mug500.py       offline data-prep (raw PLY -> normalized .npz)
+  prepare_mug500.py       offline data-prep (raw .stl meshes -> normalized .npz)
   skull_dataset.py        PyTorch Dataset over the prepared .npz files
 models/
   cpu_ops.py              CPU replacements for CUDA-only FPS/gather (see below)
   pointattn_baseline.py   Experiment 1: original architecture, CPU-adapted
   pointattn_geo.py        Experiments 2-4: our geometry-enhanced encoder
 utils/
+  stl_io.py               pure-NumPy .stl mesh reading + surface point sampling
   geometry_features.py    surface normal + curvature computation (PCA-based)
   normalization.py        normalize / denormalize, center+scale persistence
   metrics.py              Chamfer Distance, Precision, Recall, F1
@@ -152,8 +161,10 @@ pip install -r requirements.txt
 # 1) Smoke-test everything on synthetic data first (no real dataset needed):
 python tests/test_pipeline_smoke.py
 
-# 2) Prepare real data (after downloading/extracting MUG500+ PLY files):
-python data/prepare_mug500.py --raw_dir /path/to/MUG500plus/complete_skulls \
+# 2) Prepare real data (after downloading + extracting one or more
+#    MUG500+ zip ranges from figshare, e.g. "A0001-A0020.zip", so you end
+#    up with .../A0001/A0001.stl, .../A0001/A0001_clear.stl, etc.):
+python data/prepare_mug500.py --raw_dir /path/to/extracted/MUG500plus \
                                --out_dir data/processed/mug500
 
 # 3) Train the baseline (Experiment 1):
@@ -177,10 +188,22 @@ python train_contribution.py --config configs/exp4_geometry_enhanced.yaml
   been executed yet.** Run `tests/test_pipeline_smoke.py` first in your
   Colab notebook to confirm the full pipeline runs before trusting any
   real training results.
-- The exact folder layout of the real MUG500+ figshare archive hasn't been
-  confirmed yet — `prepare_mug500.py --raw_dir` currently expects a flat
-  directory of `.ply` files; adjust `_load_ply_points`/`main()` if the real
-  archive nests files differently.
+- The real MUG500+ figshare article bundles the 500 healthy skulls into
+  many range-archives (`A0001-A0020.zip`, `A0021-A0030.zip`, ...), each
+  several GB, mostly because the `.nrrd` CT volumes (which this project
+  does not need) are bundled together with the `.stl` meshes. For a
+  CPU-only Colab project there is no need to download the full ~200GB
+  article — a handful of the smaller range-archives (picked via figshare's
+  `GET /v2/articles/9616319/files` API, which lists every archive and its
+  size) gives a perfectly adequate train/val/test sample (e.g. ~25-30
+  skulls) at a few GB. `prepare_mug500.py --raw_dir` recursively searches
+  for `.stl` files under whatever you extracted, so partial downloads work
+  with no changes to the script.
+- 21 of the real `.stl`/`.nrrd` files are reported as corrupted by a
+  related paper using this dataset; `prepare_mug500.py` already skips any
+  mesh file it fails to read (with a printed warning) instead of crashing
+  the whole data-prep run, but this hasn't been exercised on a real
+  corrupted file yet (only on a synthetic one in testing).
 - PPCNet (VTK) loading/preprocessing is not yet implemented — this
   repository currently covers MUG500+ only; PPCNet needs its own loader
   (`.vtk` reading + the pre-defined 829/103/105 split) before Experiment
