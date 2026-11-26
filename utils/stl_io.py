@@ -56,18 +56,31 @@ def read_stl(path: str) -> tuple[np.ndarray, np.ndarray]:
     return _read_stl_ascii(path)
 
 
+_BINARY_TRI_DTYPE = np.dtype([
+    ("normal", "<f4", 3),
+    ("v0", "<f4", 3),
+    ("v1", "<f4", 3),
+    ("v2", "<f4", 3),
+    ("attr", "<u2"),
+])  # exactly 50 bytes/triangle, matching the binary STL record layout
+
+
 def _read_stl_binary(buf: bytes, n_tri: int) -> tuple[np.ndarray, np.ndarray]:
-    tri_verts = np.empty((n_tri, 3, 3), dtype=np.float64)
-    offset = 0
-    rec_size = 50
-    for i in range(n_tri):
-        rec = buf[offset:offset + rec_size]
-        # 12 bytes normal (skip), then 3 vertices x 3 floats x 4 bytes
-        v = struct.unpack("<9f", rec[12:48])
-        tri_verts[i, 0] = v[0:3]
-        tri_verts[i, 1] = v[3:6]
-        tri_verts[i, 2] = v[6:9]
-        offset += rec_size
+    """
+    Vectorized binary-STL parse: reinterprets the whole triangle buffer in
+    one shot via a structured NumPy dtype, instead of looping over
+    triangles in Python with per-triangle struct.unpack calls. That
+    per-triangle-loop version was only ever fast enough for the tiny
+    synthetic test cube in this file's __main__ -- on a real, dense
+    anatomical mesh (hundreds of thousands to millions of triangles,
+    which is typical for a "3D printable" skull mesh) it would take
+    minutes per file. This vectorized version reads the same number of
+    triangles in a single NumPy call, regardless of mesh size.
+    """
+    records = np.frombuffer(buf, dtype=_BINARY_TRI_DTYPE, count=n_tri)
+    tri_verts = np.stack(
+        [records["v0"], records["v1"], records["v2"]], axis=1
+    ).astype(np.float64)
     return _dedup_vertices(tri_verts)
 
 
