@@ -10,7 +10,7 @@ work_dir: outputs/exp3_curvature
 # Identical training/eval settings to exp1/exp2/exp4 -- see note there.
 batch_size: 4
 workers: 0
-nepoch: 50
+nepoch: 100
 manual_seed: 42
 
 lr: 0.0001

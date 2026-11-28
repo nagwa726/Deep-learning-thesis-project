@@ -9,7 +9,7 @@ work_dir: outputs/exp1_original
 
 batch_size: 4           # small on purpose: CPU + no mixed precision
 workers: 0              # keep 0 on CPU/Colab to avoid multiprocessing overhead
-nepoch: 50
+nepoch: 100
 manual_seed: 42
 
 lr: 0.0001
